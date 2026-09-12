@@ -707,6 +707,9 @@
                 <span>{{ $t('webhookFormat') }}</span>
                 <Icon class="webhook-format-icon" :class="{ open: webhookFormatShow }" icon="mingcute:down-small-fill" width="18" height="18"/>
               </div>
+              <el-button :loading="webhookTestLoading" :disabled="settingLoading" @click="sendWebhookTest">
+                {{ $t('testWebhook') }}
+              </el-button>
               <el-button :loading="settingLoading" type="primary" @click="webhookSave">
                 {{ $t('save') }}
               </el-button>
@@ -937,7 +940,7 @@
 
 <script setup>
 import {computed, defineOptions, nextTick, reactive, ref} from "vue";
-import {deleteBackground, setBackground, setBlackList, settingQuery, settingSet} from "@/request/setting.js";
+import {deleteBackground, setBackground, setBlackList, settingQuery, settingSet, testWebhook} from "@/request/setting.js";
 import {useSettingStore} from "@/store/setting.js";
 import {useUiStore} from "@/store/ui.js";
 import {useUserStore} from "@/store/user.js";
@@ -1079,6 +1082,7 @@ const webhookRetry = ref(0)
 const webhookSecret = ref('')
 const webhookType = ref('generic')
 const webhookFormatShow = ref(false)
+const webhookTestLoading = ref(false)
 const webhookHeadersExample = computed(() => webhookType.value === 'wecom'
     ? `POST https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=&lt;key&gt;
 Content-Type: application/json`
@@ -1440,6 +1444,33 @@ function webhookSave() {
     webhookType: webhookType.value
   }
   editSetting(form)
+}
+
+function sendWebhookTest() {
+  const url = toOssDomain(webhookUrl.value.trim())
+  if (!url) {
+    ElMessage({ message: t('webhookUrlRequired'), type: 'warning', plain: true })
+    return
+  }
+  if (isIpUrl(url)) {
+    ElMessage({ message: t('webhookIpNotSupported'), type: 'warning', plain: true })
+    return
+  }
+
+  let retry = Number(webhookRetry.value)
+  if (isNaN(retry) || retry < 0) retry = 0
+  webhookTestLoading.value = true
+  testWebhook({
+    webhookUrl: url,
+    webhookType: webhookType.value,
+    webhookRetry: retry,
+    webhookSecret: webhookSecret.value.trim(),
+    r2Domain: setting.value.r2Domain || ''
+  }).then(() => {
+    ElMessage({ message: t('webhookTestSuccess'), type: 'success', plain: true })
+  }).finally(() => {
+    webhookTestLoading.value = false
+  })
 }
 
 

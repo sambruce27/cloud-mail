@@ -1,5 +1,6 @@
 import domainUtils from '../utils/domain-uitls';
 import { Md5 } from '@smithy/md5-js';
+import BizError from '../error/biz-error';
 
 const MAX_WECOM_MARKDOWN_BYTES = 4096;
 const MAX_WECOM_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -73,6 +74,24 @@ async function md5Hex(bytes) {
 }
 
 const webhookService = {
+	async testEmail(c, config = {}) {
+		if (!config.webhookUrl) throw new BizError('Webhook 地址不能为空');
+		const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+		const result = await this.sendEmail(c, {
+			emailId: 0,
+			sendEmail: 'test@example.com',
+			name: 'Cloud Mail',
+			toEmail: 'receiver@example.com',
+			toName: 'Receiver',
+			subject: 'Webhook 推送测试',
+			text: '这是一封测试消息，用于验证 Webhook 配置是否可用。',
+			content: '<p>这是一封测试消息，用于验证 Webhook 配置是否可用。</p>',
+			code: '123456',
+			createTime: now
+		}, config.webhookUrl, config.webhookRetry, config.webhookSecret, config.webhookType, config.r2Domain);
+
+		if (!result?.ok) throw new BizError(`Webhook 测试失败: ${result?.error || '未知错误'}`);
+	},
 
 	async sendEmail(c, emailRow, webhookUrl, retry = 0, webhookSecret, webhookType = 'generic', assetDomain = '') {
 
@@ -109,10 +128,11 @@ const webhookService = {
 		};
 
 		if (webhookType === 'wecom') {
-			await this.sendPayload(webhookUrl, headers, {
+			const markdownResult = await this.sendPayload(webhookUrl, headers, {
 				msgtype: 'markdown_v2',
 				markdown_v2: { content: buildWecomMarkdown(emailRow) }
 			}, retry, true);
+			if (!markdownResult.ok) return markdownResult;
 
 			for (const imageUrl of extractImageUrls(emailRow.content, assetDomain)) {
 				try {
@@ -129,10 +149,10 @@ const webhookService = {
 					console.warn(`Webhook 图片推送已跳过 ${imageUrl}: ${e.message}`);
 				}
 			}
-			return;
+			return markdownResult;
 		}
 
-		await this.sendPayload(webhookUrl, headers, genericPayload, retry, false);
+		return this.sendPayload(webhookUrl, headers, genericPayload, retry, false);
 	},
 
 	async sendPayload(webhookUrl, headers, payload, retry, checkWecomResult) {
@@ -149,9 +169,9 @@ const webhookService = {
 				});
 
 				if (res.ok) {
-					if (!checkWecomResult) return;
+					if (!checkWecomResult) return { ok: true };
 					const result = await res.json();
-					if (result.errcode === 0) return;
+					if (result.errcode === 0) return { ok: true };
 					lastError = `errcode: ${result.errcode} errmsg: ${result.errmsg || ''}`;
 					continue;
 				}
@@ -163,6 +183,7 @@ const webhookService = {
 		}
 
 		console.error(`Webhook 推送失败: ${lastError}`);
+		return { ok: false, error: lastError };
 	}
 
 };

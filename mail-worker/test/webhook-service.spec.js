@@ -68,4 +68,35 @@ describe('webhookService WeCom delivery', () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
+
+	it('sends a test message using the unsaved webhook form values', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ errcode: 0 }), { status: 200 }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		await webhookService.testEmail({}, {
+			webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test',
+			webhookType: 'wecom',
+			webhookRetry: 0
+		});
+
+		const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(payload.msgtype).toBe('markdown_v2');
+		expect(payload.markdown_v2.content).toContain('Webhook 推送测试');
+	});
+
+	it('rejects a test request without a webhook URL', async () => {
+		await expect(webhookService.testEmail({}, { webhookType: 'wecom' }))
+			.rejects.toThrow('Webhook 地址不能为空');
+	});
+
+	it('reports the final WeCom business error to the test caller', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ errcode: 93000, errmsg: 'invalid webhook' }), { status: 200 }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expect(webhookService.testEmail({}, {
+			webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=bad',
+			webhookType: 'wecom',
+			webhookRetry: 0
+		})).rejects.toThrow('errcode: 93000 errmsg: invalid webhook');
+	});
 });
