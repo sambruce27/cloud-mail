@@ -682,6 +682,10 @@
           </div>
         </template>
         <div class="forward-set-body">
+          <el-select v-model="webhookType" :placeholder="$t('webhookType')">
+            <el-option :label="$t('webhookTypeGeneric')" value="generic"/>
+            <el-option :label="$t('webhookTypeWecom')" value="wecom"/>
+          </el-select>
           <el-input :placeholder="$t('webhookUrl')" v-model="webhookUrl" @keyup.enter="webhookSave"></el-input>
           <el-input :placeholder="$t('webhookSecret')" v-model="webhookSecret" @keyup.enter="webhookSave"></el-input>
           <div class="tg-msg-label">
@@ -1073,8 +1077,14 @@ const webhookUrl = ref('')
 const webhookStatus = ref(1)
 const webhookRetry = ref(0)
 const webhookSecret = ref('')
+const webhookType = ref('generic')
 const webhookFormatShow = ref(false)
-const webhookPayloadExample = `{
+const webhookPayloadExample = computed(() => webhookType.value === 'wecom' ? `{
+  "msgtype": "markdown_v2",
+  "markdown_v2": {
+    "content": "# 收到新邮件\\n\\n**主题：** Hello"
+  }
+}` : `{
   "emailId": 1,
   "sendEmail": "hello@example.com",
   "sendName": "hello",
@@ -1085,7 +1095,7 @@ const webhookPayloadExample = `{
   "content": "<div>Hello</div>",
   "code": "123456",
   "createTime": "2099-12-30 23:59:59"
-}`
+}`)
 const emailColumnWidth = ref(0)
 const tokenColumnWidth = ref(0)
 const ruleType = ref(0)
@@ -1276,6 +1286,7 @@ function openWebhookSetting() {
   webhookUrl.value = setting.value.webhookUrl || ''
   webhookRetry.value = setting.value.webhookRetry ?? 0
   webhookSecret.value = setting.value.webhookSecret || ''
+  webhookType.value = setting.value.webhookType || 'generic'
   webhookShow.value = true
 }
 
@@ -1412,7 +1423,8 @@ function webhookSave() {
     webhookStatus: webhookStatus.value,
     webhookUrl: url,
     webhookRetry: retry,
-    webhookSecret: webhookSecret.value.trim()
+    webhookSecret: webhookSecret.value.trim(),
+    webhookType: webhookType.value
   }
   editSetting(form)
 }

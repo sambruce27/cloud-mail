@@ -1,8 +1,80 @@
 import domainUtils from '../utils/domain-uitls';
+import { Md5 } from '@smithy/md5-js';
+
+const MAX_WECOM_MARKDOWN_BYTES = 4096;
+const MAX_WECOM_IMAGE_BYTES = 2 * 1024 * 1024;
+
+function escapeMarkdown(value = '') {
+	return String(value).replace(/([\\`*_{}\[\]()#+!|>])/g, '\\$1');
+}
+
+function displayAddress(name, address) {
+	return name ? `${escapeMarkdown(name)} <${escapeMarkdown(address || '')}>` : escapeMarkdown(address || '');
+}
+
+function truncateUtf8(value, maxBytes) {
+	const encoder = new TextEncoder();
+	if (encoder.encode(value).byteLength <= maxBytes) return value;
+
+	let result = '';
+	for (const char of value) {
+		if (encoder.encode(result + char + '…').byteLength > maxBytes) break;
+		result += char;
+	}
+	return result + '…';
+}
+
+function buildWecomMarkdown(emailRow) {
+	const details = [
+		'# 收到新邮件',
+		`**主题：** ${escapeMarkdown(emailRow.subject || '（无主题）')}`,
+		`**发件人：** ${displayAddress(emailRow.name, emailRow.sendEmail)}`,
+		`**收件人：** ${displayAddress(emailRow.toName, emailRow.toEmail)}`
+	];
+
+	if (emailRow.code) details.push(`**验证码：** \`${String(emailRow.code).replace(/`/g, '\\`')}\``);
+	if (emailRow.createTime) details.push(`**时间：** ${escapeMarkdown(emailRow.createTime)}`);
+
+	const text = String(emailRow.text || '')
+		.trim()
+		.split(/\r?\n/)
+		.map(line => `> ${escapeMarkdown(line)}`)
+		.join('\n');
+	if (text) details.push(text);
+
+	return truncateUtf8(details.join('\n\n'), MAX_WECOM_MARKDOWN_BYTES);
+}
+
+function extractImageUrls(html = '', assetDomain = '') {
+	const normalizedDomain = domainUtils.toOssDomain(assetDomain) || '';
+	const urls = [];
+	const imagePattern = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+	let match;
+	while ((match = imagePattern.exec(html))) {
+		const url = match[1].replace('{{domain}}', normalizedDomain);
+		if (/^https?:\/\//i.test(url) && !urls.includes(url)) urls.push(url);
+	}
+	return urls;
+}
+
+function toBase64(bytes) {
+	let binary = '';
+	for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+		binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+	}
+	return btoa(binary);
+}
+
+async function md5Hex(bytes) {
+	const md5 = new Md5();
+	md5.update(bytes);
+	const digest = await md5.digest();
+	return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 const webhookService = {
 
-	async sendEmail(c, emailRow, webhookUrl, retry = 0, webhookSecret) {
+	async sendEmail(c, emailRow, webhookUrl, retry = 0, webhookSecret, webhookType = 'generic', assetDomain = '') {
 
 		webhookUrl = domainUtils.toOssDomain(webhookUrl);
 
@@ -23,7 +95,7 @@ const webhookService = {
 			headers['Authorization'] = webhookSecret;
 		}
 
-		const body = JSON.stringify({
+		const genericPayload = {
 			emailId: emailRow.emailId,
 			sendEmail: emailRow.sendEmail,
 			sendName: emailRow.name,
@@ -34,7 +106,37 @@ const webhookService = {
 			content: emailRow.content,
 			code: emailRow.code,
 			createTime: emailRow.createTime
-		});
+		};
+
+		if (webhookType === 'wecom') {
+			await this.sendPayload(webhookUrl, headers, {
+				msgtype: 'markdown_v2',
+				markdown_v2: { content: buildWecomMarkdown(emailRow) }
+			}, retry, true);
+
+			for (const imageUrl of extractImageUrls(emailRow.content, assetDomain)) {
+				try {
+					const imageResponse = await fetch(imageUrl);
+					const contentType = imageResponse.headers.get('content-type') || '';
+					if (!imageResponse.ok || !contentType.startsWith('image/')) continue;
+					const bytes = new Uint8Array(await imageResponse.arrayBuffer());
+					if (!bytes.length || bytes.byteLength > MAX_WECOM_IMAGE_BYTES) continue;
+					await this.sendPayload(webhookUrl, headers, {
+						msgtype: 'image',
+						image: { base64: toBase64(bytes), md5: await md5Hex(bytes) }
+					}, retry, true);
+				} catch (e) {
+					console.warn(`Webhook 图片推送已跳过 ${imageUrl}: ${e.message}`);
+				}
+			}
+			return;
+		}
+
+		await this.sendPayload(webhookUrl, headers, genericPayload, retry, false);
+	},
+
+	async sendPayload(webhookUrl, headers, payload, retry, checkWecomResult) {
+		const body = JSON.stringify(payload);
 
 		let lastError = '';
 
@@ -47,7 +149,11 @@ const webhookService = {
 				});
 
 				if (res.ok) {
-					return;
+					if (!checkWecomResult) return;
+					const result = await res.json();
+					if (result.errcode === 0) return;
+					lastError = `errcode: ${result.errcode} errmsg: ${result.errmsg || ''}`;
+					continue;
 				}
 
 				lastError = `status: ${res.status} response: ${await res.text()}`;
@@ -62,3 +168,5 @@ const webhookService = {
 };
 
 export default webhookService;
+
+export { buildWecomMarkdown, extractImageUrls };
