@@ -687,15 +687,15 @@
             <el-option :label="$t('webhookTypeWecom')" value="wecom"/>
           </el-select>
           <el-input :placeholder="$t('webhookUrl')" v-model="webhookUrl" @keyup.enter="webhookSave"></el-input>
-          <el-input :placeholder="$t('webhookSecret')" v-model="webhookSecret" @keyup.enter="webhookSave"></el-input>
+          <el-input v-if="webhookType === 'generic'" :placeholder="$t('webhookSecret')" v-model="webhookSecret" @keyup.enter="webhookSave"></el-input>
           <div class="tg-msg-label">
             <span>{{ t('webhookRetry') }}</span>
             <el-input-number v-model="webhookRetry" :min="0" :max="5" controls-position="right"/>
           </div>
           <div v-show="webhookFormatShow" class="webhook-format">
-            <pre>Content-Type: application/json
-Authorization: &lt;secret&gt;</pre>
+            <pre>{{ webhookHeadersExample }}</pre>
             <pre>{{ webhookPayloadExample }}</pre>
+            <pre v-if="webhookType === 'wecom'">{{ webhookImagePayloadExample }}</pre>
           </div>
         </div>
         <template #footer>
@@ -1079,10 +1079,15 @@ const webhookRetry = ref(0)
 const webhookSecret = ref('')
 const webhookType = ref('generic')
 const webhookFormatShow = ref(false)
+const webhookHeadersExample = computed(() => webhookType.value === 'wecom'
+    ? `POST https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=&lt;key&gt;
+Content-Type: application/json`
+    : `Content-Type: application/json
+Authorization: &lt;secret&gt;`)
 const webhookPayloadExample = computed(() => webhookType.value === 'wecom' ? `{
   "msgtype": "markdown_v2",
   "markdown_v2": {
-    "content": "# 收到新邮件\\n\\n**主题：** Hello"
+    "content": "# 收到新邮件\\n\\n**主题：** Hello\\n\\n**发件人：** Sender &lt;sender@example.com&gt;\\n\\n**收件人：** Receiver &lt;receiver@example.com&gt;\\n\\n**验证码：** \u0060123456\u0060\\n\\n**时间：** 2099-12-30 23:59:59\\n\\n&gt; 邮件正文"
   }
 }` : `{
   "emailId": 1,
@@ -1096,6 +1101,14 @@ const webhookPayloadExample = computed(() => webhookType.value === 'wecom' ? `{
   "code": "123456",
   "createTime": "2099-12-30 23:59:59"
 }`)
+const webhookImagePayloadExample = `邮件包含可获取且不超过 2 MB 的图片时，随后逐张发送：
+{
+  "msgtype": "image",
+  "image": {
+    "base64": "&lt;图片 Base64&gt;",
+    "md5": "&lt;图片 MD5&gt;"
+  }
+}`
 const emailColumnWidth = ref(0)
 const tokenColumnWidth = ref(0)
 const ruleType = ref(0)
