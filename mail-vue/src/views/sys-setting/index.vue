@@ -695,7 +695,6 @@
           <div v-show="webhookFormatShow" class="webhook-format">
             <pre>{{ webhookHeadersExample }}</pre>
             <pre>{{ webhookPayloadExample }}</pre>
-            <pre v-if="webhookType === 'wecom'">{{ webhookImagePayloadExample }}</pre>
           </div>
         </div>
         <template #footer>
@@ -1105,14 +1104,6 @@ const webhookPayloadExample = computed(() => webhookType.value === 'wecom' ? `{
   "code": "123456",
   "createTime": "2099-12-30 23:59:59"
 }`)
-const webhookImagePayloadExample = `邮件包含可获取且不超过 2 MB 的图片时，随后逐张发送：
-{
-  "msgtype": "image",
-  "image": {
-    "base64": "&lt;图片 Base64&gt;",
-    "md5": "&lt;图片 MD5&gt;"
-  }
-}`
 const emailColumnWidth = ref(0)
 const tokenColumnWidth = ref(0)
 const ruleType = ref(0)
@@ -1464,8 +1455,7 @@ function sendWebhookTest() {
     webhookUrl: url,
     webhookType: webhookType.value,
     webhookRetry: retry,
-    webhookSecret: webhookSecret.value.trim(),
-    r2Domain: setting.value.r2Domain || ''
+    webhookSecret: webhookSecret.value.trim()
   }).then(() => {
     ElMessage({ message: t('webhookTestSuccess'), type: 'success', plain: true })
   }).finally(() => {

@@ -1,9 +1,7 @@
 import domainUtils from '../utils/domain-uitls';
-import { Md5 } from '@smithy/md5-js';
 import BizError from '../error/biz-error';
 
 const MAX_WECOM_MARKDOWN_BYTES = 4096;
-const MAX_WECOM_IMAGE_BYTES = 2 * 1024 * 1024;
 
 function escapeMarkdown(value = '') {
 	return String(value).replace(/([\\`*_{}\[\]()#+!|>])/g, '\\$1');
@@ -46,33 +44,6 @@ function buildWecomMarkdown(emailRow) {
 	return truncateUtf8(details.join('\n\n'), MAX_WECOM_MARKDOWN_BYTES);
 }
 
-function extractImageUrls(html = '', assetDomain = '') {
-	const normalizedDomain = domainUtils.toOssDomain(assetDomain) || '';
-	const urls = [];
-	const imagePattern = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
-	let match;
-	while ((match = imagePattern.exec(html))) {
-		const url = match[1].replace('{{domain}}', normalizedDomain);
-		if (/^https?:\/\//i.test(url) && !urls.includes(url)) urls.push(url);
-	}
-	return urls;
-}
-
-function toBase64(bytes) {
-	let binary = '';
-	for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-		binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-	}
-	return btoa(binary);
-}
-
-async function md5Hex(bytes) {
-	const md5 = new Md5();
-	md5.update(bytes);
-	const digest = await md5.digest();
-	return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
 const webhookService = {
 	async testEmail(c, config = {}) {
 		if (!config.webhookUrl) throw new BizError('Webhook 地址不能为空');
@@ -88,12 +59,12 @@ const webhookService = {
 			content: '<p>这是一封测试消息，用于验证 Webhook 配置是否可用。</p>',
 			code: '123456',
 			createTime: now
-		}, config.webhookUrl, config.webhookRetry, config.webhookSecret, config.webhookType, config.r2Domain);
+		}, config.webhookUrl, config.webhookRetry, config.webhookSecret, config.webhookType);
 
 		if (!result?.ok) throw new BizError(`Webhook 测试失败: ${result?.error || '未知错误'}`);
 	},
 
-	async sendEmail(c, emailRow, webhookUrl, retry = 0, webhookSecret, webhookType = 'generic', assetDomain = '') {
+	async sendEmail(c, emailRow, webhookUrl, retry = 0, webhookSecret, webhookType = 'generic') {
 
 		webhookUrl = domainUtils.toOssDomain(webhookUrl);
 
@@ -128,28 +99,10 @@ const webhookService = {
 		};
 
 		if (webhookType === 'wecom') {
-			const markdownResult = await this.sendPayload(webhookUrl, headers, {
+			return this.sendPayload(webhookUrl, headers, {
 				msgtype: 'markdown_v2',
 				markdown_v2: { content: buildWecomMarkdown(emailRow) }
 			}, retry, true);
-			if (!markdownResult.ok) return markdownResult;
-
-			for (const imageUrl of extractImageUrls(emailRow.content, assetDomain)) {
-				try {
-					const imageResponse = await fetch(imageUrl);
-					const contentType = imageResponse.headers.get('content-type') || '';
-					if (!imageResponse.ok || !contentType.startsWith('image/')) continue;
-					const bytes = new Uint8Array(await imageResponse.arrayBuffer());
-					if (!bytes.length || bytes.byteLength > MAX_WECOM_IMAGE_BYTES) continue;
-					await this.sendPayload(webhookUrl, headers, {
-						msgtype: 'image',
-						image: { base64: toBase64(bytes), md5: await md5Hex(bytes) }
-					}, retry, true);
-				} catch (e) {
-					console.warn(`Webhook 图片推送已跳过 ${imageUrl}: ${e.message}`);
-				}
-			}
-			return markdownResult;
 		}
 
 		return this.sendPayload(webhookUrl, headers, genericPayload, retry, false);
@@ -190,4 +143,4 @@ const webhookService = {
 
 export default webhookService;
 
-export { buildWecomMarkdown, extractImageUrls };
+export { buildWecomMarkdown };

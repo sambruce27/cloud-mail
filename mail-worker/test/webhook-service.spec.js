@@ -33,29 +33,20 @@ describe('webhookService WeCom delivery', () => {
 		});
 	});
 
-	it('sends supported email images as separate non-linking image messages', async () => {
-		const png = new Uint8Array([1, 2, 3, 4]);
-		const fetchMock = vi.fn(async (url) => {
-			if (url === 'https://cdn.example.com/picture.png') {
-				return new Response(png, { status: 200, headers: { 'content-type': 'image/png' } });
-			}
-			return new Response(JSON.stringify({ errcode: 0 }), { status: 200 });
-		});
+	it('sends only one markdown_v2 message for an email containing images', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ errcode: 0 }), { status: 200 }));
 		vi.stubGlobal('fetch', fetchMock);
 
 		await webhookService.sendEmail({}, {
 			...email,
-			content: '<p>With image</p><img src="https://cdn.example.com/picture.png">'
+			content: '<p>With image</p><img src="https://cdn.example.com/picture.png"><img src="cid:local">'
 		}, 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test', 0, '', 'wecom');
 
-		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
-			msgtype: 'image',
-			image: {
-				base64: 'AQIDBA==',
-				md5: '08d6c05a21512a79a1dfeb9d2a8f262f'
-			}
-		});
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock.mock.calls[0][0]).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test');
+		const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(payload.msgtype).toBe('markdown_v2');
+		expect(payload.markdown_v2.content).toContain('Line one');
 	});
 
 	it('retries when WeCom returns a business error in a successful HTTP response', async () => {

@@ -194,7 +194,7 @@ export async function email(message, env, ctx) {
 
 		//转发到 Webhook
 		if (webhookStatus === settingConst.webhookStatus.OPEN && webhookUrl) {
-			await webhookService.sendEmail({ env }, emailRow, webhookUrl, webhookRetry, webhookSecret, webhookType, r2Domain);
+			await webhookService.sendEmail({ env }, emailRow, webhookUrl, webhookRetry, webhookSecret, webhookType);
 		}
 
 	} catch (e) {
